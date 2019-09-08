@@ -1,0 +1,259 @@
+#include <iostream>
+#include <fstream>
+#include <stdlib.h>
+#include <string>
+#include <string.h>
+#include <math.h>
+#include "linearAlgebra.hpp"
+
+//struct to store the vectors and class that it belongs to 
+//present in train.txt
+struct pattern
+{
+    double** v;
+    int c;
+};
+
+//struct to store the final output values of the model i.e.
+//vector w and threshold value w0
+struct parameters
+{
+	double** w;
+	double w0;
+};
+
+//sizes of the training and test set
+const int N = 960;
+const int M = 412;
+
+//sigmoid function
+double sigmoid(double a)
+{
+	double t = exp(-a);
+	return 1.0/(1+t);
+}
+
+//function to read files and extract data from files
+struct pattern* readData(char* f1)
+{
+    struct pattern* pat = new pattern[1000];
+
+    for(int i=0; i<N; i++)
+    {
+    	pat[i].v = matrixCreate(4, 1);
+    }
+
+    //opening the file and reading the file line by line
+    std::string line;
+    std::ifstream myfile(f1);
+    if(myfile.is_open())
+    {
+        int cnt = 0;
+        while(std::getline(myfile, line))
+        {
+            //In each line the 4 co-ordinates and class is copied to
+            //patterns struct array
+            int len = line.length();
+            int str = 0, count = 0;
+            for(int i=0; i<len; i++)
+            {
+                if(line[i] == ',' || i == len-1)
+                {
+                	if(i != len-1)
+                    	line[i] = '\0';
+                    if(count < 4)
+                    {
+                        pat[cnt].v[count][0] = atof(&line[str]);
+                    }
+                    else
+                    {
+                        pat[cnt].c = atoi(&line[str]);
+                    }
+                    count++;
+                    str = i+1;
+                }
+            }
+            cnt++;
+        }
+        myfile.close();
+    }
+    else std::cout << "Unable to open file\n";
+
+    //function returns the struct array that contains
+    //4 co-ordinates and the class
+    return pat;
+}
+
+//function to train our gaussian model
+struct parameters* trainAlgo(struct pattern* pat)
+{	
+	//parameters of the model line mean, covariance matrix etc..
+	int N1 = 0, N2 = 0;
+	double** u1 = matrixCreate(4, 1);
+	double** u2 = matrixCreate(4, 1);
+	double** S1 = matrixCreate(4, 4);
+	double** S2 = matrixCreate(4, 4);
+	double** S = matrixCreate(4, 4);
+	double pC1, pC2;
+
+	//Initializing the vectors to zero
+	for(int i=0; i<4; i++)
+	{
+		for(int j=0; j<4; j++)
+		{
+			S1[i][j] = 0.0;
+			S2[i][j] = 0.0;
+			S[i][j] = 0.0;
+		}
+	}
+	for(int i=0; i<4; i++)
+	{
+		u1[i][0] = 0.0;
+		u2[i][0] = 0.0;
+	}
+
+	//finding N1, N2 and means u1 and u2
+	for(int i=0; i<N; i++)
+	{
+		if(pat[i].c == 1)
+		{
+			N1++;
+			u1 = matrixAdd(u1, pat[i].v, 4, 1);
+		}
+		else
+		{
+			N2++;
+			u2 = matrixAdd(u2, pat[i].v, 4, 1);
+		}
+	}
+	//finding pC1, pC2 and the means
+	pC1 = N1/(float)N;
+	pC2 = 1.0 - pC1;
+	u1 = matrixMult((1.0/N1), u1, 4, 1);
+	u2 = matrixMult((1.0/N2), u2, 4, 1);
+
+	//loop to find the matrices S1 and S2
+	for(int i=0; i<N; i++)
+	{
+		if(pat[i].c == 1)
+		{
+			double** temp1 = matrixMult((-1.0), u1, 4, 1);
+			double** temp2 = matrixAdd(pat[i].v, temp1, 4, 1);
+			double** temp3 = matrixTranspose(temp2, 4, 1);
+			double** temp4 = matrixMult(temp2, 4, 1, temp3, 1, 4);
+			S1 = matrixAdd(S1, temp4, 4, 4);
+		}
+		else
+		{
+			double** temp1 = matrixMult((-1.0), u2, 4, 1);
+			double** temp2 = matrixAdd(pat[i].v, temp1, 4, 1);
+			double** temp3 = matrixTranspose(temp2, 4, 1);
+			double** temp4 = matrixMult(temp2, 4, 1, temp3, 1, 4);
+			S2 = matrixAdd(S2, temp4, 4, 4);
+		}
+	}
+
+	//finding matrix S using S1 and S2
+	S = matrixAdd(S1, S2, 4, 4);
+	S = matrixMult((1.0/N), S, 4, 4);
+	//finding the inverse of S
+	int x = matrixInverse(S, 4);
+	if(x==-1)
+		std::cout << "Sigma Matrix is singular\n";
+
+	//finding w and w0
+	//using the standard formulas involving the parameters of the PGM
+	double** temp1 = matrixMult(-1.0, u2, 4, 1);
+	double** temp2 = matrixAdd(u1, temp1, 4, 1);
+	double** w = matrixMult(S, 4, 4, temp2, 4, 1);
+
+	double** u1_t = matrixTranspose(u1, 4, 1);
+	double** u2_t = matrixTranspose(u2, 4, 1);
+
+	temp1 = matrixMult(S, 4, 4, u1, 4, 1);
+	temp1 = matrixMult(u1_t, 1, 4, temp1, 4, 1);
+	double t1 = -(0.5)*(temp1[0][0]);
+
+	temp2 = matrixMult(S, 4, 4, u2, 4, 1);
+	temp2 = matrixMult(u2_t, 1, 4, temp2, 4, 1);
+	double t2 = (0.5)*(temp2[0][0]);
+
+	double t3 = log(pC1/pC2);
+
+	double w0 = t1 + t2 + t3;
+
+	//storing the paramaters w and w0 in a struct before returning it
+	struct parameters* par = new parameters;
+	par->w = w;
+	par->w0 = w0;
+
+	return par;
+}
+
+//function to test the model that has been trained
+void testAlgo(struct parameters* par, struct pattern* pat)
+{	
+	double w0 = par->w0;
+	double** w_t = matrixTranspose(par->w, 4, 1);
+	int a=0, b=0, c=0, d=0;
+
+	for(int i=0; i<M; i++)
+	{
+		double** temp = matrixMult(w_t, 1, 4, pat[i].v, 4, 1);
+		double temp1 = (sigmoid(temp[0][0] + w0) > 0.5)? 1:0 ;
+		if(pat[i].c == temp1)
+		{
+			if(temp1 == 0)
+				a++;
+			else
+				d++;
+		}
+		else
+		{
+			if(temp1 == 0)
+				c++;
+			else
+				b++;
+		}
+	}
+
+	std::cout << "_______CONFUSION MATRIX________\n";
+	std::cout << "          |negative |positive \n";
+	std::cout << "negative  |"<<a<<"      |"<<b<<"\n" ;
+	std::cout << "positive  |"<<c<<"        |"<<d<<"\n";
+	std::cout << "_______________________________\n";
+	std::cout << "Recall     : " << (double)d/(d+c) << std::endl;
+	std::cout << "Precision  : " << (double)d/(b+d) << std::endl;
+
+}	
+
+int main()
+{
+	char f1[50];
+	char f2[50];
+	strcpy(f1, "train.txt");
+	strcpy(f2, "test.txt");
+
+	//obtaining patterns from train.txt
+	struct pattern* pat1 = readData(f1);
+	//obtaining parameters from the extracated data
+	struct parameters* par = trainAlgo(pat1);
+	//obtaining patterns from test.txt
+	struct pattern* pat2 = readData(f2);
+
+	std::cout << "Vector w: [ ";
+	for(int i=0; i<4; i++)
+	{
+		for(int j=0; j<1; j++)
+		{
+			std::cout << par->w[i][j] << " ";
+		}
+	}
+	std::cout << "]\n";
+	std::cout << "threshold value w0: " << par->w0 << std::endl;
+	std::cout << std::endl;
+
+	testAlgo(par, pat2);
+
+	return 0;
+}
